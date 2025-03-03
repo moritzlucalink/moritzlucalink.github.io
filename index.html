@@ -25,35 +25,70 @@
 <body>
     <div class="container">
         <div class="row">
-            <div class="col-sm-2">
-                <a href="#"><img src="img/profile_col_new.jpg" alt="Moritz Link profile picture" class="headshot img-circle"></a>
-                <br/>
-                <br/>
-                <!-- <small>
-                Moritz Link
-                s</small> -->
-            </div>
-            <div class="col-sm-10">
-                <br/>
-                <br/>
-                <h1>moritz luca link <br>
-                    <small>
-                        <a>moritzlink@mailbox.org</a> <span class="sep">|</span>
-                        <span style="display: inline-block; white-space: nowrap;">
-                            <a href="https://github.com/moritzlucalink"><i class="fa fa-github"></i></a>
-                            <span class="sep">|</span>
-                            <a href="https://www.linkedin.com/in/moritz-link-a9314015b/"><i class="fa fa-linkedin-square"></i></a>
-                            <span class="sep">|</span>
-                        </span>
-                    </small>
-                </h1>
-            </div>
-        </div>
-       <hr/> 
+          <!-- Left Side: Profile Picture -->
+          <div class="col-sm-2 text-center">
+              <a href="#"><img src="img/profile_col_new.jpg" alt="Moritz Link profile picture" class="headshot img-circle"></a>
+          </div>
 
+          <!-- Right Side: Name & Links -->
+          <div class="col-sm-10 text-right">
+            <h1 class="name-title">moritz luca link</h1>
+            <small>
+              <a href="mailto:moritzlink@mailbox.org">moritzlink@mailbox.org</a> 
+              <span class="sep">|</span>
+              <a href="https://github.com/moritzlucalink"><i class="fa fa-github"></i></a>
+              <span class="sep">|</span>
+              <a href="https://www.linkedin.com/in/moritz-link-a9314015b/"><i class="fa fa-linkedin-square"></i></a>
+            </small>
+          </div>
+        </div>
+
+        <!-- Horizontal Navigation Menu -->
+        <div class="row">
+          <div class="col-sm-12 text-center">
+            <ul class="nav-menu">
+              <li><a href="#about">about</a></li>
+              <li><a href="#research">research</a></li>
+              <li><a href="#news">news & talks</a></li>
+              <li><a href="+teaching">teaching</a></li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Navigation Menu Style -->
+        <style>
+          .nav-menu {
+              list-style-type: none;
+              padding: 0;
+              text-align: center;
+          }
+      
+          .nav-menu li {
+              margin: 8px 0;
+          }
+      
+          .nav-menu a {
+              text-decoration: none;
+              color: white;
+              font-size: 14px;
+              display: block;
+              padding: 6px 10px;
+              border: 1px solid white;
+              border-radius: 5px;
+              transition: all 0.3s ease-in-out;
+          }
+      
+          .nav-menu a:hover {
+              background-color: white;
+              color: black;
+          }
+        </style>
+        
+      
+        <!-- About section -->
         <div class="row">
             <div class="col-sm-3">
-                <h5>about</h5> 
+                <h5 if="about">about</h5> 
                 <a href="https://github.com/moritzlucalink">github</a> <br>
                 <a href="https://www.linkedin.com/in/moritz-link-a9314015b/">linkedin</a> <br>
                 <a href="https://www.mathematik.uni-konstanz.de/en/volkwein/members/research-group/doctoral-students/moritz-link/">uni konstanz</a> <br>
@@ -78,7 +113,7 @@
         <!-- Research -->
         <div class="row">
             <div class="col-sm-3">
-                <h5>research</h5>
+                <h5 id="research">research</h5>
             </div>
             <div class="col-sm-9">
                 
@@ -200,7 +235,7 @@ https://optimization-online.org/?p=27337" target="_blank">optimization online</a
         <hr/> 
         <div class="row">
             <div class="col-sm-3">
-                <h5>news & talks </h5>
+                <h5 id="news">news & talks </h5>
             </div>
             <div class="col-sm-9">
               <ul id="newsList">
@@ -262,7 +297,7 @@ https://optimization-online.org/?p=27337" target="_blank">optimization online</a
         <hr/> 
         <div class="row">
             <div class="col-sm-3">
-                <h5>teaching activities </h5>
+                <h5 id="teaching">teaching activities </h5>
             </div>
             <div class="col-sm-9">
               <ul id="teachingList">
