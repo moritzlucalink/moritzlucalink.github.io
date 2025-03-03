@@ -9,8 +9,9 @@ body {
 }
 /* Default link style */
 a {
-    color: #f8f9fa; /* soft white for dark background */
+    color: #ffcc66; /* soft white for dark background */
     text-decoration: none; /* Removes underline for cleaner look */
+    font-weight: 500; /*Slightly bolder for readability */
     transition: color 0.3s ease-in-out, background-color 0.3s ease-in-out;
 }
 
