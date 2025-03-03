@@ -117,6 +117,8 @@ img.headshot {
     width:120px;
     max-width:100%;
     float:left;
+    border-radius: 15px;
+    border: 2px solid white;
     /* border-radius: 50%; Makes the image circular */
     /* width: 120px;       /* Adjust width for uniform scaling */
      /*height: 120px;       /*Ensure height matches width */
