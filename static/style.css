@@ -7,10 +7,29 @@ body {
     color: #ffffff; /* Light blue text */
     background-color: #000000; /* Middle blue background */
 }
-
+/* Default link style */
 a {
-    color: #ffffff; /* Orange for links */
+    color: #f8f9fa; /* soft white for dark background */
     text-decoration: none; /* Removes underline for cleaner look */
+    transition: color 0.3s ease-in-out, background-color 0.3s ease-in-out;
+}
+
+/* Hover effect */
+a:hover {
+    color: #ffd700; /* soft gold color on hover */
+    background-color: rgba(255, 255, 255, 0.1); /* Light fade background */
+    padding: 2px 4px; /* slight padding to make hover smooth */
+    border-radius: 5px; /* smooth rounded edges */
+}
+
+/* Emphasize important links (e.g., menu or profile links) */
+.important-link {
+    font-weight: bold; /* Make important links slightly bolder */
+    color: #ffffff;
+}
+
+.important-link:hover {
+    color: #ffcc00; /* Softer gold on hover */
 }
 
 h1 { 
