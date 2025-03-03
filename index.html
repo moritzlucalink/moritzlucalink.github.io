@@ -223,7 +223,22 @@ https://optimization-online.org/?p=27337" target="_blank">optimization online</a
               <button class="show-more-btn" onclick="toggleItems('newsList')">Show More</button>
             </div>
         </div>
-               
+        <!-- JavaScript for Show More -->
+        <script>
+        function toggleItems(listId) {
+            var list = document.getElementById(listId);
+            var hiddenItems = list.querySelector('.hidden-items');
+            var button = list.nextElementSibling;
+        
+            if (hiddenItems.style.display === "none") {
+                hiddenItems.style.display = "inline";
+                button.innerText = "Show Less";
+            } else {
+                hiddenItems.style.display = "none";
+                button.innerText = "Show More";
+            }
+        }
+        </script>
       <!-- Teaching -->
         <hr/> 
         <div class="row">
