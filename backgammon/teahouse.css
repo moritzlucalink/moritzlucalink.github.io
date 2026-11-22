@@ -267,6 +267,45 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 var(--gutter); }
 }
 .overlay-title { font-family: "Marcellus", serif; font-size: 30px; color: var(--brass-hi); letter-spacing: 0.05em; }
 .overlay-sub { font-size: 19px; margin: 6px 0 16px; font-style: italic; }
+
+/* quiet secondary action under the main button */
+.link-btn {
+  display: block;
+  margin: 12px auto 0;
+  padding: 6px 10px;
+  background: none;
+  border: 0;
+  color: var(--brass-hi);
+  font: 15px "Marcellus", serif;
+  letter-spacing: 0.05em;
+  opacity: .8;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.link-btn:hover { opacity: 1; text-decoration: underline; }
+
+/* game-mode picker: two large tiles */
+.choices { display: flex; gap: 12px; justify-content: center; }
+.choice {
+  width: 176px;
+  padding: 16px 12px 14px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  font-family: inherit;
+  color: var(--ivory);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform .15s var(--ease), border-color .2s, background .2s;
+}
+.choice svg { width: 54px; height: 36px; color: var(--brass-hi); margin-bottom: 6px; }
+.choice:hover { border-color: var(--brass); background: rgba(212, 169, 58, 0.12); }
+.choice:active { transform: scale(.96); }
+.choice:focus-visible, .link-btn:focus-visible { outline: 2px solid var(--ivory); outline-offset: 3px; }
+.choice-title { font-family: "Marcellus", serif; font-size: 17px; letter-spacing: 0.04em; color: var(--brass-hi); }
+.choice-sub { font-size: 16px; font-style: italic; opacity: .8; }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 
 /* ---------- rules sheet ---------- */
@@ -324,6 +363,14 @@ kbd {
   .msg { font-size: 15px; }
   .kbd-hint { display: none; }
   .rules { padding: 18px 18px 14px; font-size: 17px; }
+  .overlay-card { padding: 16px 16px; }
+  .overlay-title { font-size: 24px; }
+  .overlay-sub { margin-bottom: 10px; }
+  .choices { gap: 8px; }
+  .choice { width: 136px; padding: 12px 8px 10px; }
+  .choice svg { width: 44px; height: 30px; margin-bottom: 2px; }
+  .choice-title { font-size: 15px; }
+  .choice-sub { font-size: 14px; }
 }
 @media (max-width: 420px) {
   .pname { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

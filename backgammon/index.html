@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#3a0e0c">
   <title>Tavla · Backgammon — Moritz Link</title>
-  <meta name="description" content="Play backgammon (tavla) in the browser — two players on one device.">
+  <meta name="description" content="Play backgammon (tavla) in the browser, against the computer or with two players on one device.">
   <link rel="icon" href="../img/icon.png" type="image/png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -36,7 +36,7 @@
       </svg>
       <div>
         <h1>Tavla</h1>
-        <p class="subtitle">backgammon &middot; two players, one table</p>
+        <p class="subtitle" id="subtitle">backgammon</p>
       </div>
     </div>
 
@@ -63,6 +63,36 @@
           <div id="overlay-title" class="overlay-title"></div>
           <div id="overlay-sub" class="overlay-sub"></div>
           <button id="overlay-new" class="btn" type="button">Play again</button>
+          <button id="overlay-mode" class="link-btn" type="button">Change players</button>
+        </div>
+      </div>
+      <div id="modepick" class="overlay" hidden>
+        <div class="overlay-card" role="dialog" aria-labelledby="mode-title">
+          <div id="mode-title" class="overlay-title">New game</div>
+          <div class="overlay-sub">Who&rsquo;s playing?</div>
+          <div class="choices">
+            <button id="mode-bot" class="choice" type="button">
+              <svg viewBox="0 0 48 32" aria-hidden="true">
+                <circle cx="13" cy="10" r="5" fill="none" stroke="currentColor" stroke-width="2"/>
+                <path d="M4 28c0-5.5 4-9 9-9s9 3.5 9 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <rect x="28" y="6" width="16" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
+                <circle cx="33.5" cy="13" r="1.6" fill="currentColor"/><circle cx="38.5" cy="13" r="1.6" fill="currentColor"/>
+                <path d="M36 6V2.5M31 28h10M36 20v8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              <span class="choice-title">Against the computer</span>
+              <span class="choice-sub">You play White</span>
+            </button>
+            <button id="mode-pvp" class="choice" type="button">
+              <svg viewBox="0 0 48 32" aria-hidden="true">
+                <circle cx="14" cy="10" r="5" fill="none" stroke="currentColor" stroke-width="2"/>
+                <path d="M5 28c0-5.5 4-9 9-9s9 3.5 9 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <circle cx="34" cy="10" r="5" fill="none" stroke="currentColor" stroke-width="2"/>
+                <path d="M25 28c0-5.5 4-9 9-9s9 3.5 9 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              <span class="choice-title">Two players</span>
+              <span class="choice-sub">On this device</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -70,7 +100,7 @@
     <section class="table-bar" aria-label="Players">
       <div class="player" id="card0">
         <span class="swatch white" aria-hidden="true"></span>
-        <span class="pname">White</span>
+        <span class="pname" id="name0">White</span>
         <span class="pstats" id="stats0"></span>
         <span class="pscore" id="score0" title="Points this session"></span>
       </div>
@@ -82,7 +112,7 @@
       <div class="player right" id="card1">
         <span class="pscore" id="score1" title="Points this session"></span>
         <span class="pstats" id="stats1"></span>
-        <span class="pname">Black</span>
+        <span class="pname" id="name1">Black</span>
         <span class="swatch black" aria-hidden="true"></span>
       </div>
 
@@ -133,9 +163,13 @@
     </ul>
     <p class="kbd-hint">Keyboard: <kbd>Space</kbd> roll or hand over, <kbd>U</kbd> undo, <kbd>Esc</kbd> deselect.</p>
     <p>The board-layout button switches between <em>Auto</em>, <em>Wide</em> and <em>Upright</em>. In Auto, the board turns upright on tall screens like phones.</p>
+
+    <h3>Against the computer</h3>
+    <p>You play White. The computer rolls and moves on its own, one checker at a time, and its moves can&rsquo;t be undone. For now it&rsquo;s a beginner that picks a random legal move. Stronger opponents will follow.</p>
   </dialog>
 
   <script src="engine.js"></script>
+  <script src="bots.js"></script>
   <script src="ui.js"></script>
 </body>
 </html>
