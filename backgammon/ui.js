@@ -1,13 +1,17 @@
-/* Tavla UI: hot-seat backgammon on an SVG board. Rules live in engine.js (window.BG). */
+/* Tavla UI: hot-seat backgammon on an SVG board. Rules live in engine.js (window.BG).
+   Interaction: tap the dice to roll / hand over; drag or tap checkers to move. */
 (function () {
   'use strict';
   var BG = window.BG;
 
-  // ---- geometry (SVG units) ----
+  // ---- geometry (board units; the "wide" board is 1040 x 700) ----
   var W = 1040, H = 700, F = 24, PW = 70, R = 30, TRI_H = 280, STACK = 300;
   var BAR_L = 444, BAR_R = 514, FIELD_R = 934, TRAY_L = 950, TRAY_R = 1016;
-  var MID = H / 2;
+  var MID = H / 2, BX = (BAR_L + BAR_R) / 2;
+  var LEFT_CX = (F + BAR_L) / 2, RIGHT_CX = (BAR_R + FIELD_R) / 2;
+  var DIE = 54, DIE_STEP = 66;
   var NAMES = ['White', 'Black'];
+  var reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
   function pointX(i) {
     var c;
@@ -16,26 +20,31 @@
   }
   function isTop(i) { return i >= 12; }
   function spacing(n, len) { return n <= 1 ? 0 : Math.min(2 * R, (len - 2 * R) / (n - 1)); }
-  function checkerY(i, k, n) {
-    var sp = spacing(n, STACK);
-    return isTop(i) ? F + R + k * sp : H - F - R - k * sp;
+  function checkerY(i, k, n) { var sp = spacing(n, STACK); return isTop(i) ? F + R + k * sp : H - F - R - k * sp; }
+  function barY(p, k, n) { var sp = spacing(n, 260); return p === BG.WHITE ? MID - R - 10 - k * sp : MID + R + 10 + k * sp; }
+  function slabY(p, k) { return p === BG.WHITE ? H - F - 8 - (k + 1) * 13 : F + 8 + k * 13; }
+  function locPos(loc, p, k, n) {
+    if (loc === 'bar') return { x: BX, y: barY(p, k, n) };
+    if (loc === 'off') return { x: (TRAY_L + TRAY_R) / 2, y: slabY(p, k) + 5.5 };
+    return { x: pointX(loc), y: checkerY(loc, k, n) };
   }
-  function barY(p, k, n) {
-    var sp = spacing(n, 260);
-    return p === BG.WHITE ? MID - R - 10 - k * sp : MID + R + 10 + k * sp;
-  }
+  function countAt(s, loc, p) { return loc === 'bar' ? s.bar[p] : loc === 'off' ? s.off[p] : Math.abs(s.points[loc]); }
+  function topPos(s, loc, p) { var n = countAt(s, loc, p); return locPos(loc, p, Math.max(n - 1, 0), Math.max(n, 1)); }
+  function topKey(loc, p) { return loc === 'bar' ? 'bar' + p : loc === 'off' ? 'off' + p : 'p' + loc; }
+  function diceSide(p) { return p === BG.WHITE ? RIGHT_CX : LEFT_CX; }
 
-  // ---- fair dice ----
+  // ---- dice & haptics ----
   function rng() {
-    if (window.crypto && crypto.getRandomValues) {
-      var a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] / 4294967296;
+    if (window.crypto && window.crypto.getRandomValues) {
+      var a = new Uint32Array(1); window.crypto.getRandomValues(a); return a[0] / 4294967296;
     }
     return Math.random();
   }
   function roll() { return BG.rollDie(rng); }
+  function haptic(ms) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* unsupported */ } }
 
   // ---- game state ----
-  var g, score = [0, 0];
+  var g, score = [0, 0], anim = null;
 
   function newGame() {
     g = {
@@ -45,75 +54,121 @@
       dice: null,
       played: [],
       selected: null,
-      opening: null,         // {w, b} last opening roll
+      opening: null,         // last opening roll {w, b}, shown after a tie
       result: null,
-      msg: 'Each player rolls one die. The higher die starts.'
+      msg: 'Tap the dice. The higher roll starts.'
     };
+    anim = null;
     render();
   }
 
-  function legal() {
-    return g.phase === 'move' ? BG.nextMoves(g.turnStart, g.dice, g.played) : [];
+  function legal() { return g.phase === 'move' ? BG.nextMoves(g.turnStart, g.dice, g.played) : []; }
+  function uniq(a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }); }
+  function sources() { return uniq(legal().map(function (m) { return m.from; })); }
+  function isSource(loc) { return sources().indexOf(loc) >= 0; }
+
+  function remainingDice() {
+    if (!g.dice) return [];
+    var vals = g.dice[0] === g.dice[1] ? [g.dice[0], g.dice[0], g.dice[0], g.dice[0]] : g.dice.slice();
+    var used = {};
+    g.played.forEach(function (m) { used[m.die] = (used[m.die] || 0) + 1; });
+    return vals.map(function (v) { var u = used[v] > 0; if (u) used[v]--; return { v: v, used: u }; });
   }
 
+  // All destinations for the checker at `src` this turn, including multi-die moves of the same checker.
+  // Returns [{to, path}], preferring the fewest steps, then the smallest dice (keeps big dice for later).
+  function pathsFrom(src) {
+    var best = {}, frontier = [{ at: src, path: [] }];
+    while (frontier.length) {
+      var next = [];
+      frontier.forEach(function (f) {
+        BG.nextMoves(g.turnStart, g.dice, g.played.concat(f.path)).forEach(function (m) {
+          if (m.from !== f.at) return;
+          var path = f.path.concat([m]), key = String(m.to), cur = best[key];
+          var sum = path.reduce(function (a, x) { return a + x.die; }, 0);
+          if (!cur || path.length < cur.path.length || (path.length === cur.path.length && sum < cur.sum)) {
+            best[key] = { to: m.to, path: path, sum: sum };
+          }
+          if (m.to !== 'off') next.push({ at: m.to, path: path });
+        });
+      });
+      frontier = next;
+    }
+    return Object.keys(best).map(function (k) { return best[k]; });
+  }
+  function pathTo(src, to) {
+    var r = pathsFrom(src).filter(function (p) { return p.to === to; });
+    return r.length ? r[0].path : null;
+  }
+
+  function setHint(prefix) {
+    var t;
+    if (g.phase !== 'move') t = '';
+    else if (legal().length) t = 'Drag or tap a checker.';
+    else if (!g.played.length) t = 'No possible move. Tap the dice to pass.';
+    else if (remainingDice().some(function (d) { return !d.used; })) t = 'No further move possible. Tap the dice to hand over.';
+    else t = 'Tap the dice to hand over.';
+    g.msg = (prefix ? prefix + ' ' : '') + t;
+  }
+
+  function autoSelect() {
+    var s = sources();
+    g.selected = s.length === 1 ? s[0] : null;
+  }
+
+  // ---- actions ----
   function rollAction() {
     if (g.phase === 'opening') {
       var w = roll(), b = roll();
       g.opening = { w: w, b: b };
-      if (w === b) { g.msg = 'Both rolled ' + w + '. Roll again.'; render(); return; }
+      anim = { dice: true };
+      haptic(12);
+      if (w === b) { g.msg = 'Both rolled ' + w + '. Tap to roll again.'; render(); return; }
       var start = w > b ? BG.WHITE : BG.BLACK;
       if (g.state.turn !== start) g.state = BG.endTurn(g.state);
       g.opening = null;
-      startTurn([w, b], NAMES[start] + ' starts with ' + Math.max(w, b) + '–' + Math.min(w, b) + '.');
+      startTurn([w, b], NAMES[start] + ' starts.');
     } else if (g.phase === 'roll') {
-      var d1 = roll(), d2 = roll();
-      startTurn([d1, d2], NAMES[g.state.turn] + ' rolled ' + d1 + '–' + d2 + (d1 === d2 ? ' (doubles).' : '.'));
+      haptic(12);
+      startTurn([roll(), roll()], '');
     }
   }
 
-  function startTurn(dice, msg) {
+  function startTurn(dice, prefix) {
     g.phase = 'move';
     g.dice = dice;
     g.turnStart = g.state;
     g.played = [];
-    g.selected = null;
-    g.msg = msg;
-    var l = legal();
-    if (!l.length) g.msg += ' No legal move. Press Pass.';
-    autoSelect(l);
+    anim = { dice: true };
+    autoSelect();
+    setHint(prefix);
     render();
   }
 
-  function autoSelect(l) {
-    var froms = uniq(l.map(function (m) { return m.from; }));
-    g.selected = froms.length === 1 ? froms[0] : null;
-  }
-
-  function uniq(a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }); }
-
-  function play(m) {
-    g.played.push(m);
-    g.state = BG.applyMove(g.state, m);
+  function execute(path, origin) {
+    var p = g.state.turn, src = path[0].from;
+    var from = origin || topPos(g.state, src, p);
+    var hit = null;
+    path.forEach(function (m) {
+      if (typeof m.to === 'number' && g.state.points[m.to] === (p === BG.WHITE ? -1 : 1)) hit = locPos(m.to, 1 - p, 0, 1);
+      g.played.push(m);
+      g.state = BG.applyMove(g.state, m);
+    });
+    anim = { move: { key: topKey(path[path.length - 1].to, p), from: from, hitFrom: hit, hitKey: 'bar' + (1 - p) } };
+    haptic(hit ? [8, 40, 14] : 8);
     var w = BG.winner(g.state);
     if (w) {
       g.phase = 'over';
       g.result = w;
-      score[w.player] += w.kind;
       g.selected = null;
+      score[w.player] += w.kind;
       render();
       return;
     }
-    var l = legal();
-    if (!l.length) {
-      g.msg = g.played.length < (g.dice[0] === g.dice[1] ? 4 : 2) && hasUnused()
-        ? 'No further move possible. Press Done.'
-        : 'Turn complete. Press Done, or Undo.';
-    }
-    autoSelect(l);
+    autoSelect();
+    setHint('');
     render();
   }
-
-  function hasUnused() { return remainingDice().some(function (d) { return !d.used; }); }
 
   function undo() {
     if (g.phase !== 'move' || !g.played.length) return;
@@ -121,54 +176,50 @@
     var s = g.turnStart;
     g.played.forEach(function (m) { s = BG.applyMove(s, m); });
     g.state = s;
-    g.msg = NAMES[g.state.turn] + ' to move.';
-    autoSelect(legal());
+    autoSelect();
+    setHint('');
     render();
   }
 
-  function done() {
-    if (g.phase !== 'move' || legal().length) return;
+  function handOver() {
     g.state = BG.endTurn(g.state);
     g.phase = 'roll';
     g.dice = null;
     g.played = [];
     g.selected = null;
-    g.msg = NAMES[g.state.turn] + ' to roll.';
+    g.msg = NAMES[g.state.turn] + ': tap the dice to roll.';
+    haptic(6);
     render();
   }
 
-  function clickHit(target) {
-    if (target === 'roll') { rollAction(); return; }
-    if (g.phase !== 'move') return;
-    var l = legal();
-    if (g.selected !== null) {
-      var cands = l.filter(function (m) { return m.from === g.selected && m.to === target; });
-      if (cands.length) {
-        // Same from/to with different dice (bearing off): use the smallest die, keep the big one.
-        cands.sort(function (a, b) { return a.die - b.die; });
-        play(cands[0]);
-        return;
-      }
+  function diceTap() {
+    if (g.phase === 'opening' || g.phase === 'roll') rollAction();
+    else if (g.phase === 'move') {
+      if (!legal().length) handOver();
+      else { anim = { shake: true }; render(); }
     }
-    var isSource = l.some(function (m) { return m.from === target; });
-    g.selected = isSource ? target : null;
+  }
+
+  function tap(h) {
+    if (h === 'dice') { diceTap(); return; }
+    if (g.phase !== 'move') return;
+    if (g.selected !== null) {
+      var path = pathTo(g.selected, h);
+      if (path) { execute(path, null); return; }
+      if (h === g.selected) { g.selected = null; render(); return; }
+    }
+    if (isSource(h)) {
+      var ts = pathsFrom(h);
+      if (ts.length === 1) { execute(ts[0].path, null); return; }   // only one place to go: just go
+      g.selected = h;
+      render();
+      return;
+    }
+    g.selected = null;
     render();
   }
 
-  // dice with used flags, in display order
-  function remainingDice() {
-    if (!g.dice) return [];
-    var vals = g.dice[0] === g.dice[1] ? [g.dice[0], g.dice[0], g.dice[0], g.dice[0]] : g.dice.slice();
-    var usedCount = {};
-    g.played.forEach(function (m) { usedCount[m.die] = (usedCount[m.die] || 0) + 1; });
-    return vals.map(function (v) {
-      var used = usedCount[v] > 0;
-      if (used) usedCount[v]--;
-      return { v: v, used: used };
-    });
-  }
-
-  // ---- SVG rendering ----
+  // ---- SVG pieces ----
   var DEFS = [
     '<defs>',
     '<linearGradient id="frameG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a2c15"/><stop offset=".5" stop-color="#341709"/><stop offset="1" stop-color="#4d2410"/></linearGradient>',
@@ -185,6 +236,7 @@
     '<feColorMatrix in="n" type="matrix" values="0 0 0 0 0.18  0 0 0 0 0.08  0 0 0 0 0.02  0 0 0 1.1 -0.25"/>',
     '<feComposite in2="SourceGraphic" operator="in"/></filter>',
     '<filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="3" stdDeviation="2.5" flood-color="#000" flood-opacity=".55"/></filter>',
+    '<filter id="lift" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="10" stdDeviation="7" flood-color="#000" flood-opacity=".5"/></filter>',
     '<filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>',
     '</defs>'
   ].join('');
@@ -193,30 +245,23 @@
     return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (rx || 0) + '" fill="' + fill + '"/>' +
       '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (rx || 0) + '" fill="#000" filter="url(#grain)" opacity=".55"/>';
   }
-
   function diamond(cx, cy, w, h, fill) {
     return '<polygon points="' + cx + ',' + (cy - h) + ' ' + (cx + w) + ',' + cy + ' ' + cx + ',' + (cy + h) + ' ' + (cx - w) + ',' + cy + '" fill="' + fill + '"/>';
   }
-
   function triangle(i, fill, extra) {
     var x = pointX(i), b = isTop(i) ? F : H - F, tip = isTop(i) ? F + TRI_H : H - F - TRI_H;
     return '<polygon points="' + (x - PW / 2 + 2) + ',' + b + ' ' + (x + PW / 2 - 2) + ',' + b + ' ' + x + ',' + tip + '" fill="' + fill + '" ' + (extra || '') + '/>';
   }
-
-  function checker(cx, cy, p, ring) {
-    var edge = p === 0 ? '#8a7650' : '#0b0604';
-    var groove = p === 0 ? '#a8956a' : '#6b4630';
-    var s = '<g filter="url(#shadow)">' +
-      '<circle cx="' + cx + '" cy="' + cy + '" r="' + R + '" fill="url(#chk' + p + ')" stroke="' + edge + '" stroke-width="1.5"/>' +
-      '</g>' +
+  function checker(pos, p, ring, key) {
+    var cx = pos.x, cy = pos.y;
+    var edge = p === 0 ? '#8a7650' : '#0b0604', groove = p === 0 ? '#a8956a' : '#6b4630';
+    var s = '<g class="ck"' + (key ? ' data-top="' + key + '" data-x="' + cx + '" data-y="' + cy + '"' : '') + '>' +
+      '<circle cx="' + cx + '" cy="' + cy + '" r="' + R + '" fill="url(#chk' + p + ')" stroke="' + edge + '" stroke-width="1.5" filter="url(#shadow)"/>' +
       '<circle cx="' + cx + '" cy="' + cy + '" r="' + (R * 0.7) + '" fill="none" stroke="' + groove + '" stroke-width="1.5" opacity=".7"/>' +
       '<circle cx="' + cx + '" cy="' + cy + '" r="' + (R * 0.22) + '" fill="none" stroke="' + groove + '" stroke-width="1.2" opacity=".6"/>';
-    if (ring === 'selected') {
-      s += '<circle cx="' + cx + '" cy="' + cy + '" r="' + (R + 3) + '" fill="none" stroke="#f6d988" stroke-width="4" filter="url(#glow)"/>';
-    } else if (ring === 'movable') {
-      s += '<circle cx="' + cx + '" cy="' + cy + '" r="' + (R + 1) + '" fill="none" stroke="#f6d988" stroke-width="2" opacity=".75"/>';
-    }
-    return s;
+    if (ring === 'selected') s += '<circle cx="' + cx + '" cy="' + cy + '" r="' + (R + 3) + '" fill="none" stroke="#f6d988" stroke-width="4" filter="url(#glow)"/>';
+    else if (ring === 'movable') s += '<circle cx="' + cx + '" cy="' + cy + '" r="' + (R + 1) + '" fill="none" stroke="#f6d988" stroke-width="2" opacity=".75"/>';
+    return s + '</g>';
   }
 
   var PIPS = {
@@ -225,42 +270,44 @@
     6: [[-1, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [1, 1]]
   };
   function die(cx, cy, v, p, used) {
-    var S = 54, body = p === 0 ? '#f7efdc' : '#2b140b', pip = p === 0 ? '#2b140b' : '#f3e6c8';
-    var s = '<g opacity="' + (used ? 0.3 : 1) + '" filter="url(#shadow)">' +
-      '<rect x="' + (cx - S / 2) + '" y="' + (cy - S / 2) + '" width="' + S + '" height="' + S + '" rx="10" fill="' + body + '" stroke="' + (p === 0 ? '#bfa878' : '#6b4630') + '" stroke-width="1.5"/>';
+    var body = p === 0 ? '#f7efdc' : '#2b140b', pip = p === 0 ? '#2b140b' : '#f3e6c8';
+    var s = '<g class="die' + (used ? ' used' : '') + '" opacity="' + (used ? 0.3 : 1) + '" filter="url(#shadow)">' +
+      '<rect x="' + (cx - DIE / 2) + '" y="' + (cy - DIE / 2) + '" width="' + DIE + '" height="' + DIE + '" rx="10" fill="' + body + '" stroke="' + (p === 0 ? '#bfa878' : '#6b4630') + '" stroke-width="1.5"/>';
     PIPS[v].forEach(function (o) { s += '<circle cx="' + (cx + o[0] * 14) + '" cy="' + (cy + o[1] * 14) + '" r="5" fill="' + pip + '"/>'; });
     return s + '</g>';
   }
-  function diceRow(cx, list, p) {
-    var s = '';
-    list.forEach(function (d, k) { s += die(cx + (k - (list.length - 1) / 2) * 66, MID, d.v, p, d.used); });
-    return s;
+  function ghostDie(cx, cy) {
+    return '<g class="die ghost"><rect x="' + (cx - DIE / 2) + '" y="' + (cy - DIE / 2) + '" width="' + DIE + '" height="' + DIE + '" rx="10" fill="#f6d988" fill-opacity=".12" stroke="#f6d988" stroke-width="2" stroke-dasharray="7 5"/>' +
+      '<circle cx="' + cx + '" cy="' + cy + '" r="5" fill="#f6d988" opacity=".55"/></g>';
   }
-  var LEFT_CX = (F + BAR_L) / 2, RIGHT_CX = (BAR_R + FIELD_R) / 2;
-  function diceSide(p) { return p === BG.WHITE ? RIGHT_CX : LEFT_CX; }
-
-  var svg = document.getElementById('board');
+  function rowXs(cx, n) { var xs = []; for (var k = 0; k < n; k++) xs.push(cx + (k - (n - 1) / 2) * DIE_STEP); return xs; }
+  function diceHit(cx, n) {
+    var w = (n - 1) * DIE_STEP + DIE + 24;
+    return '<rect data-hit="dice" x="' + (cx - w / 2) + '" y="' + (MID - DIE / 2 - 12) + '" width="' + w + '" height="' + (DIE + 24) + '" rx="16" fill="transparent"/>';
+  }
 
   // ---- layout: 'wide' board, or 'upright' (rotated 90° for tall screens such as phones) ----
   var layoutPref = 'auto';
-  try { layoutPref = localStorage.getItem('tavla-layout') || 'auto'; } catch (e) { /* storage unavailable */ }
+  try { layoutPref = window.localStorage.getItem('tavla-layout') || 'auto'; } catch (e) { /* storage unavailable */ }
   var upright = false;
   function computeUpright() {
     if (layoutPref === 'wide') return false;
     if (layoutPref === 'upright') return true;
     return window.innerHeight > window.innerWidth * 1.05;
   }
-  // board coordinates -> screen coordinates (upright: rotate 90° clockwise)
   function T(x, y) { return upright ? { x: H - y, y: x } : { x: x, y: y }; }
+
+  var svg = document.getElementById('board');
 
   function render() {
     upright = computeUpright();
     document.body.classList.toggle('upright', upright);
     document.body.classList.toggle('wide', !upright);
+
     var s = g.state, out = '', top = '', i, k, n;
     var l = legal();
-    var sources = uniq(l.map(function (m) { return m.from; }));
-    var targets = g.selected === null ? [] : uniq(l.filter(function (m) { return m.from === g.selected; }).map(function (m) { return m.to; }));
+    var srcs = uniq(l.map(function (m) { return m.from; }));
+    var targets = g.selected === null ? [] : pathsFrom(g.selected);
 
     // frame, fields, tray, bar
     out += wood(0, 0, W, H, 'url(#frameG)', 18);
@@ -269,106 +316,80 @@
     out += wood(BAR_R, F, FIELD_R - BAR_R, H - 2 * F, 'url(#fieldG)');
     out += '<rect x="' + TRAY_L + '" y="' + F + '" width="' + (TRAY_R - TRAY_L) + '" height="' + (H - 2 * F) + '" rx="6" fill="#1e0c05" stroke="#000" stroke-opacity=".6"/>';
     out += '<line x1="' + TRAY_L + '" y1="' + MID + '" x2="' + TRAY_R + '" y2="' + MID + '" stroke="url(#brass)" stroke-width="2" opacity=".6"/>';
-
-    // triangles
     for (i = 0; i < 24; i++) out += triangle(i, i % 2 === 0 ? 'url(#triDark)' : 'url(#triLight)', 'stroke="#c0902f" stroke-opacity=".45" stroke-width="1"');
-
-    // field inner edges and lamp light
     out += '<rect x="' + F + '" y="' + F + '" width="' + (BAR_L - F) + '" height="' + (H - 2 * F) + '" fill="none" stroke="#2a1208" stroke-width="2"/>';
     out += '<rect x="' + BAR_R + '" y="' + F + '" width="' + (FIELD_R - BAR_R) + '" height="' + (H - 2 * F) + '" fill="none" stroke="#2a1208" stroke-width="2"/>';
     out += '<rect x="' + F + '" y="' + F + '" width="' + (FIELD_R - F) + '" height="' + (H - 2 * F) + '" fill="url(#lamp)" pointer-events="none"/>';
-
-    // bar with mother-of-pearl inlay and brass hinges
     out += '<rect x="' + (BAR_L + 6) + '" y="' + F + '" width="' + (BAR_R - BAR_L - 12) + '" height="' + (H - 2 * F) + '" fill="#000" opacity=".18"/>';
-    var bx = (BAR_L + BAR_R) / 2;
     for (k = 0; k < 7; k++) {
       var dy = F + 40 + k * ((H - 2 * F - 80) / 6);
       if (Math.abs(dy - MID) < 20) continue;
-      out += diamond(bx, dy, 9, 15, 'url(#pearl)');
+      out += diamond(BX, dy, 9, 15, 'url(#pearl)');
     }
-    out += diamond(bx, MID, 12, 20, 'url(#pearl)');
+    out += diamond(BX, MID, 12, 20, 'url(#pearl)');
     out += '<rect x="' + (BAR_L + 4) + '" y="' + (MID - 152) + '" width="' + (BAR_R - BAR_L - 8) + '" height="14" rx="3" fill="url(#brass)"/>';
     out += '<rect x="' + (BAR_L + 4) + '" y="' + (MID + 138) + '" width="' + (BAR_R - BAR_L - 8) + '" height="14" rx="3" fill="url(#brass)"/>';
-
-    // brass corners
     [[0, 0, 1, 1], [W, 0, -1, 1], [0, H, 1, -1], [W, H, -1, -1]].forEach(function (c) {
       var x = c[0], y = c[1], sx = c[2], sy = c[3];
       out += '<path d="M' + x + ' ' + (y + sy * 52) + ' L' + x + ' ' + y + ' L' + (x + sx * 52) + ' ' + y +
         ' L' + (x + sx * 52) + ' ' + (y + sy * 10) + ' L' + (x + sx * 10) + ' ' + (y + sy * 10) + ' L' + (x + sx * 10) + ' ' + (y + sy * 52) + ' Z" fill="url(#brass)"/>';
     });
 
-    // point numbers from the view of the player to move
-    var view = s.turn;
+    // point numbers, from the view of the player to move (screen space, so they stay upright)
     for (i = 0; i < 24; i++) {
-      var num = view === BG.WHITE ? i + 1 : 24 - i;
+      var num = s.turn === BG.WHITE ? i + 1 : 24 - i;
       var lp = T(pointX(i), isTop(i) ? F / 2 : H - F / 2);
       top += '<text x="' + lp.x + '" y="' + lp.y + '" text-anchor="middle" dominant-baseline="central" font-family="Marcellus, serif" font-size="' + (upright ? 17 : 13) + '" fill="#e2c27a" opacity=".85" pointer-events="none">' + num + '</text>';
     }
 
-    // target highlights under checkers
+    // target highlights (under the checkers)
     targets.forEach(function (t) {
-      if (t === 'off') {
+      var faint = t.path.length > 1 ? ' opacity=".6"' : '';
+      if (t.to === 'off') {
         var ty = s.turn === BG.WHITE ? MID : F;
-        out += '<rect class="pulse" x="' + TRAY_L + '" y="' + ty + '" width="' + (TRAY_R - TRAY_L) + '" height="' + (MID - F) + '" rx="6" fill="#f6d988"/>';
+        out += '<rect class="pulse" x="' + TRAY_L + '" y="' + ty + '" width="' + (TRAY_R - TRAY_L) + '" height="' + (MID - F) + '" rx="6" fill="#f6d988"' + faint + '/>';
       } else {
-        out += triangle(t, '#f6d988', 'class="pulse"');
+        out += '<g' + faint + '>' + triangle(t.to, '#f6d988', 'class="pulse"') + '</g>';
       }
     });
 
-    // checkers on points
+    // checkers
     for (i = 0; i < 24; i++) {
       n = Math.abs(s.points[i]);
       if (!n) continue;
-      var p = s.points[i] > 0 ? 0 : 1;
+      var owner = s.points[i] > 0 ? 0 : 1;
       for (k = 0; k < n; k++) {
-        var ring = null;
-        if (k === n - 1 && p === s.turn) ring = g.selected === i ? 'selected' : (g.selected === null && sources.indexOf(i) >= 0 ? 'movable' : null);
-        out += checker(pointX(i), checkerY(i, k, n), p, ring);
+        var ring = null, isTopK = k === n - 1;
+        if (isTopK && owner === s.turn && g.phase === 'move') ring = g.selected === i ? 'selected' : (g.selected === null && srcs.indexOf(i) >= 0 ? 'movable' : null);
+        out += checker(locPos(i, owner, k, n), owner, ring, isTopK ? 'p' + i : null);
       }
     }
-    // bar checkers
     [0, 1].forEach(function (p) {
       n = s.bar[p];
       for (k = 0; k < n; k++) {
-        var ring = null;
-        if (k === n - 1 && p === s.turn && sources.indexOf('bar') >= 0) ring = g.selected === 'bar' ? 'selected' : 'movable';
-        out += checker(bx, barY(p, k, n), p, ring);
+        var ring = null, isTopK = k === n - 1;
+        if (isTopK && p === s.turn && srcs.indexOf('bar') >= 0) ring = g.selected === 'bar' ? 'selected' : 'movable';
+        out += checker(locPos('bar', p, k, n), p, ring, isTopK ? 'bar' + p : null);
       }
     });
-    // borne-off checkers as slabs
     [0, 1].forEach(function (p) {
       for (k = 0; k < s.off[p]; k++) {
-        var y = p === BG.WHITE ? H - F - 8 - (k + 1) * 13 : F + 8 + k * 13;
-        out += '<rect x="' + (TRAY_L + 6) + '" y="' + y + '" width="' + (TRAY_R - TRAY_L - 12) + '" height="11" rx="3" fill="' + (p === 0 ? '#ecdfbf' : '#3a1b10') + '" stroke="' + (p === 0 ? '#a8956a' : '#0b0604') + '"/>';
+        var y = slabY(p, k), isTopK = k === s.off[p] - 1;
+        out += '<rect' + (isTopK ? ' data-top="off' + p + '" data-x="' + (TRAY_L + TRAY_R) / 2 + '" data-y="' + (y + 5.5) + '"' : '') +
+          ' x="' + (TRAY_L + 6) + '" y="' + y + '" width="' + (TRAY_R - TRAY_L - 12) + '" height="11" rx="3" fill="' + (p === 0 ? '#ecdfbf' : '#3a1b10') + '" stroke="' + (p === 0 ? '#a8956a' : '#0b0604') + '"/>';
       }
     });
 
-    // landing markers for targets
+    // landing markers
     targets.forEach(function (t) {
-      if (t === 'off') return;
-      var cnt = Math.abs(s.points[t]);
-      var mine = cnt && (s.points[t] > 0 ? 0 : 1) === s.turn;
+      if (t.to === 'off') return;
+      var cnt = Math.abs(s.points[t.to]);
+      var mine = cnt && (s.points[t.to] > 0 ? 0 : 1) === s.turn;
       var kk = mine ? cnt : 0;
-      out += '<circle cx="' + pointX(t) + '" cy="' + checkerY(t, kk, Math.max(kk + 1, mine ? cnt + 1 : 1)) + '" r="' + (R - 2) + '" fill="#f6d988" fill-opacity=".25" stroke="#f6d988" stroke-width="2.5" stroke-dasharray="6 5"/>';
+      out += '<circle cx="' + pointX(t.to) + '" cy="' + checkerY(t.to, kk, mine ? cnt + 1 : 1) + '" r="' + (R - 2) + '" fill="#f6d988" fill-opacity=".25" stroke="#f6d988" stroke-width="2.5" stroke-dasharray="6 5"' + (t.path.length > 1 ? ' opacity=".6"' : '') + '/>';
     });
 
-    // dice
-    if (g.phase === 'opening' && g.opening) {
-      out += die(diceSide(0), MID, g.opening.w, 0, false) + die(diceSide(1), MID, g.opening.b, 1, false);
-    } else if ((g.phase === 'move' || g.phase === 'over') && g.dice) {
-      out += diceRow(diceSide(s.turn), remainingDice(), s.turn);
-    } else if (g.phase === 'roll' || g.phase === 'opening') {
-      // Roll prompt, drawn upright in screen space. Upright boards get a round button that fits the centre gap.
-      var c = T(g.phase === 'roll' ? diceSide(s.turn) : RIGHT_CX, MID);
-      var label = g.phase === 'roll' ? (upright ? 'Roll' : NAMES[s.turn] + ': roll') : (upright ? 'Start' : 'Roll for start');
-      var shape = upright
-        ? '<circle cx="' + c.x + '" cy="' + c.y + '" r="44"'
-        : '<rect x="' + (c.x - 90) + '" y="' + (c.y - 28) + '" width="180" height="56" rx="28"';
-      top += '<g data-hit="roll" role="button" aria-label="Roll dice">' + shape + ' fill="#2a1208" fill-opacity=".7" stroke="#f6d988" stroke-width="2" stroke-dasharray="7 6"/>' +
-        '<text x="' + c.x + '" y="' + c.y + '" text-anchor="middle" dominant-baseline="central" font-family="Marcellus, serif" font-size="' + (upright ? 26 : 20) + '" fill="#f6d988" letter-spacing="1.5">' + label + '</text></g>';
-    }
-
-    // invisible hit areas (on top)
+    // hit areas for points, bar and tray
     if (g.phase === 'move') {
       for (i = 0; i < 24; i++) {
         out += '<rect data-hit="' + i + '" x="' + (pointX(i) - PW / 2) + '" y="' + (isTop(i) ? F : MID) + '" width="' + PW + '" height="' + (MID - F) + '" fill="transparent"/>';
@@ -377,35 +398,174 @@
       out += '<rect data-hit="off" x="' + TRAY_L + '" y="' + F + '" width="' + (TRAY_R - TRAY_L) + '" height="' + (H - 2 * F) + '" fill="transparent"/>';
     }
 
+    // dice (above the hit areas, so tapping them always works)
+    var diceLabel = 'Roll dice';
+    if (g.phase === 'opening') {
+      [0, 1].forEach(function (p) {
+        var cx = diceSide(p);
+        out += g.opening ? die(cx, MID, p === 0 ? g.opening.w : g.opening.b, p, false) : ghostDie(cx, MID);
+        out += diceHit(cx, 1);
+      });
+    } else if (g.phase === 'roll') {
+      var rx = diceSide(s.turn);
+      rowXs(rx, 2).forEach(function (x) { out += ghostDie(x, MID); });
+      out += diceHit(rx, 2);
+    } else if (g.dice) {
+      var cx = diceSide(s.turn), list = remainingDice(), xs = rowXs(cx, list.length);
+      list.forEach(function (d, j) { out += die(xs[j], MID, d.v, s.turn, d.used); });
+      if (g.phase === 'move') {
+        out += diceHit(cx, list.length);
+        if (!l.length) {
+          diceLabel = g.played.length ? 'Hand over to ' + NAMES[1 - s.turn] : 'Pass';
+          var bp = T(xs[xs.length - 1] + DIE / 2 + 30, MID);
+          top += '<g data-hit="dice" class="badge-pop"><circle cx="' + bp.x + '" cy="' + bp.y + '" r="' + (upright ? 27 : 21) + '" fill="url(#brass)" stroke="#5a3d0e" stroke-width="1.5" filter="url(#shadow)"/>' +
+            '<path d="M' + (bp.x - 8) + ' ' + bp.y + ' l5.5 6 l10.5 -12" fill="none" stroke="#2a1208" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></g>';
+        } else {
+          diceLabel = 'Dice';
+        }
+      }
+    }
+
     svg.setAttribute('viewBox', upright ? '0 0 ' + H + ' ' + W : '0 0 ' + W + ' ' + H);
-    svg.innerHTML = DEFS + '<g' + (upright ? ' transform="translate(' + H + ' 0) rotate(90)"' : '') + '>' + out + '</g>' + top;
-    renderPanel(l);
+    svg.innerHTML = DEFS + '<g id="layer"' + (upright ? ' transform="translate(' + H + ' 0) rotate(90)"' : '') + '>' + out + '</g>' + top;
+    svg.setAttribute('aria-label', 'Backgammon board. ' + g.msg);
+    var dh = svg.querySelectorAll ? svg.querySelectorAll('[data-hit="dice"]') : [];
+    for (k = 0; k < dh.length; k++) { dh[k].setAttribute('role', 'button'); dh[k].setAttribute('aria-label', diceLabel); }
+
+    renderPanel();
     renderLayoutButton();
+    runAnim();
   }
 
-  // ---- side panel ----
+  // ---- motion ----
+  function runAnim() {
+    var a = anim; anim = null;
+    if (!a || reduceMotion || typeof svg.querySelector !== 'function') return;
+    var ease = 'cubic-bezier(.2,.8,.2,1)';
+    function slide(el, from, ms) {
+      if (!el || !el.animate || !from) return;
+      var dx = from.x - parseFloat(el.getAttribute('data-x')), dy = from.y - parseFloat(el.getAttribute('data-y'));
+      el.animate([{ transform: 'translate(' + dx + 'px,' + dy + 'px)' }, { transform: 'translate(0,0)' }], { duration: ms, easing: ease });
+    }
+    if (a.dice) {
+      var ds = svg.querySelectorAll('.die');
+      for (var i = 0; i < ds.length; i++) {
+        if (!ds[i].animate) continue;
+        ds[i].animate([
+          { transform: 'rotate(' + (i % 2 ? 140 : -140) + 'deg) scale(.3)', opacity: 0 },
+          { transform: 'rotate(' + (i % 2 ? -12 : 12) + 'deg) scale(1.08)', opacity: 1, offset: 0.7 },
+          { transform: 'rotate(0) scale(1)', opacity: 1 }
+        ], { duration: 420, delay: i * 50, easing: ease, fill: 'backwards' });
+      }
+    }
+    if (a.move) {
+      slide(svg.querySelector('[data-top="' + a.move.key + '"]'), a.move.from, 260);
+      if (a.move.hitFrom) slide(svg.querySelector('[data-top="' + a.move.hitKey + '"]'), a.move.hitFrom, 380);
+    }
+    if (a.shake) {
+      var dd = svg.querySelectorAll('.die');
+      for (var j = 0; j < dd.length; j++) {
+        if (dd[j].animate) dd[j].animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(-3px)' }, { transform: 'translateX(0)' }], { duration: 280 });
+      }
+    }
+  }
+
+  // ---- drag & drop ----
+  var drag = null, suppressClick = false;
+  function toBoard(cx, cy) {
+    var layer = document.getElementById('layer');
+    var pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy;
+    return pt.matrixTransform(layer.getScreenCTM().inverse());
+  }
+  function hitAt(cx, cy) {
+    var els = document.elementsFromPoint(cx, cy);
+    for (var i = 0; i < els.length; i++) {
+      var h = els[i].getAttribute && els[i].getAttribute('data-hit');
+      if (h !== null && h !== undefined) return parseHit(h);
+    }
+    return null;
+  }
+  function parseHit(h) { return /^\d+$/.test(h) ? parseInt(h, 10) : h; }
+
+  svg.addEventListener('pointerdown', function (e) {
+    suppressClick = false;
+    if (g.phase !== 'move' || (e.button !== undefined && e.button > 0)) return;
+    var el = e.target.closest && e.target.closest('[data-hit]');
+    if (!el) return;
+    var h = parseHit(el.getAttribute('data-hit'));
+    if (!isSource(h)) return;
+    drag = { src: h, x0: e.clientX, y0: e.clientY, id: e.pointerId, active: false };
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (!drag || e.pointerId !== drag.id) return;
+    if (!drag.active) {
+      if (Math.abs(e.clientX - drag.x0) + Math.abs(e.clientY - drag.y0) < 8) return;
+      g.selected = drag.src;
+      render();
+      var el = svg.querySelector('[data-top="' + topKey(drag.src, g.state.turn) + '"]');
+      if (!el) { drag = null; return; }
+      drag.active = true;
+      drag.el = el;
+      drag.home = { x: parseFloat(el.getAttribute('data-x')), y: parseFloat(el.getAttribute('data-y')) };
+      drag.p0 = toBoard(drag.x0, drag.y0);
+      el.parentNode.appendChild(el);              // draw above everything else
+      el.style.pointerEvents = 'none';
+      el.setAttribute('filter', 'url(#lift)');
+    }
+    var p = toBoard(e.clientX, e.clientY);
+    drag.dx = p.x - drag.p0.x; drag.dy = p.y - drag.p0.y;
+    drag.el.style.transform = 'translate(' + drag.dx + 'px,' + drag.dy + 'px) scale(1.06)';
+    drag.el.style.transformBox = 'fill-box';
+    drag.el.style.transformOrigin = 'center';
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
+  function endDrag(e, cancelled) {
+    if (!drag || e.pointerId !== drag.id) return;
+    var d = drag; drag = null;
+    if (!d.active) return;
+    suppressClick = true;
+    var dropAt = { x: d.home.x + (d.dx || 0), y: d.home.y + (d.dy || 0) };
+    var target = cancelled ? null : hitAt(e.clientX, e.clientY);
+    var path = target === null || target === d.src ? null : pathTo(d.src, target);
+    if (path) { execute(path, dropAt); return; }
+    // snap back
+    render();
+    if (!reduceMotion) {
+      var el = svg.querySelector('[data-top="' + topKey(d.src, g.state.turn) + '"]');
+      if (el && el.animate) el.animate([{ transform: 'translate(' + (d.dx || 0) + 'px,' + (d.dy || 0) + 'px)' }, { transform: 'translate(0,0)' }], { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    }
+  }
+  window.addEventListener('pointerup', function (e) { endDrag(e, false); });
+  window.addEventListener('pointercancel', function (e) { endDrag(e, true); });
+
+  svg.addEventListener('click', function (e) {
+    if (suppressClick) { suppressClick = false; return; }
+    var el = e.target.closest('[data-hit]');
+    if (!el) { if (g.phase === 'move' && g.selected !== null) { g.selected = null; render(); } return; }
+    tap(parseHit(el.getAttribute('data-hit')));
+  });
+
+  // ---- panel ----
   var $ = function (id) { return document.getElementById(id); };
 
-  function renderPanel(l) {
+  function renderPanel() {
     var s = g.state;
     [0, 1].forEach(function (p) {
-      $('stats' + p).textContent = 'Pips ' + BG.pipCount(s, p) + ' · Off ' + s.off[p] + (s.bar[p] ? ' · Bar ' + s.bar[p] : '');
-      $('score' + p).textContent = score[p];
+      var extra = (s.bar[p] ? ' · ' + s.bar[p] + ' on bar' : '') + (s.off[p] ? ' · ' + s.off[p] + ' off' : '');
+      $('stats' + p).textContent = BG.pipCount(s, p) + ' pips' + extra;
+      $('score' + p).textContent = score[p] ? score[p] : '';
+      $('score' + p).hidden = !score[p];
       $('card' + p).classList.toggle('active', g.phase !== 'opening' && g.phase !== 'over' && s.turn === p);
     });
     $('msg').textContent = g.msg;
-    $('roll').disabled = !(g.phase === 'roll' || g.phase === 'opening');
-    $('roll').textContent = g.phase === 'opening' ? 'Roll for start' : 'Roll';
     $('undo').disabled = !(g.phase === 'move' && g.played.length);
-    $('done').disabled = !(g.phase === 'move' && !l.length);
-    $('done').textContent = g.phase === 'move' && !g.played.length && !l.length ? 'Pass' : 'Done';
 
     var ov = $('overlay');
     if (g.phase === 'over') {
       var kinds = ['', 'wins', 'wins with a gammon', 'wins with a backgammon'];
       $('overlay-title').textContent = NAMES[g.result.player] + ' ' + kinds[g.result.kind];
       $('overlay-sub').textContent = '+' + g.result.kind + (g.result.kind === 1 ? ' point' : ' points') +
-        '. Session: White ' + score[0] + ', Black ' + score[1] + '.';
+        ' · White ' + score[0] + ', Black ' + score[1];
       ov.hidden = false;
     } else {
       ov.hidden = true;
@@ -415,21 +575,46 @@
   var LAYOUT_NAMES = { auto: 'Auto', wide: 'Wide', upright: 'Upright' };
   var LAYOUT_NEXT = { auto: 'wide', wide: 'upright', upright: 'auto' };
   function renderLayoutButton() {
-    $('layout-label').textContent = LAYOUT_NAMES[layoutPref];
     var r = $('layout-rect');
     if (upright) { r.setAttribute('x', 6); r.setAttribute('y', 3); r.setAttribute('width', 12); r.setAttribute('height', 18); }
     else { r.setAttribute('x', 3); r.setAttribute('y', 6); r.setAttribute('width', 18); r.setAttribute('height', 12); }
+    $('layout-badge').hidden = layoutPref !== 'auto';
     var b = $('layout');
-    b.title = 'Board: ' + LAYOUT_NAMES[layoutPref] + ' (tap to switch to ' + LAYOUT_NAMES[LAYOUT_NEXT[layoutPref]] + ')';
+    b.title = 'Board: ' + LAYOUT_NAMES[layoutPref] + ' (switch to ' + LAYOUT_NAMES[LAYOUT_NEXT[layoutPref]] + ')';
     b.setAttribute('aria-label', b.title);
   }
   function cycleLayout() {
     layoutPref = LAYOUT_NEXT[layoutPref];
-    try { localStorage.setItem('tavla-layout', layoutPref); } catch (e) { /* ignore */ }
+    try { window.localStorage.setItem('tavla-layout', layoutPref); } catch (e) { /* ignore */ }
     render();
   }
 
-  // ---- events ----
+  // ---- menu & keys ----
+  var newArmed = false, newTimer = null, msgBeforeArm = '';
+  function disarmNew() {
+    if (!newArmed) return;
+    newArmed = false;
+    clearTimeout(newTimer);
+    $('newgame').classList.remove('armed');
+    $('newgame').setAttribute('aria-label', 'New game');
+  }
+  $('newgame').addEventListener('click', function () {
+    var inProgress = g.phase === 'move' || g.phase === 'roll';
+    if (inProgress && !newArmed) {
+      newArmed = true;
+      this.classList.add('armed');
+      this.setAttribute('aria-label', 'Tap again to start a new game');
+      msgBeforeArm = g.msg;
+      g.msg = 'Tap again to start a new game.';
+      renderPanel();
+      newTimer = setTimeout(function () { disarmNew(); g.msg = msgBeforeArm; renderPanel(); }, 3000);
+      return;
+    }
+    disarmNew();
+    newGame();
+  });
+  $('overlay-new').addEventListener('click', newGame);
+  $('undo').addEventListener('click', undo);
   $('layout').addEventListener('click', cycleLayout);
   $('rules-btn').addEventListener('click', function () {
     var d = $('rules');
@@ -440,24 +625,12 @@
     var u = computeUpright();
     if (u !== lastUpright) { lastUpright = u; render(); }
   });
-  svg.addEventListener('click', function (e) {
-    var el = e.target.closest('[data-hit]');
-    if (!el) { if (g.phase === 'move' && g.selected !== null) { g.selected = null; render(); } return; }
-    var h = el.getAttribute('data-hit');
-    clickHit(/^\d+$/.test(h) ? parseInt(h, 10) : h);
-  });
-  $('roll').addEventListener('click', rollAction);
-  $('undo').addEventListener('click', undo);
-  $('done').addEventListener('click', done);
-  $('newgame').addEventListener('click', newGame);
-  $('overlay-new').addEventListener('click', newGame);
   document.addEventListener('keydown', function (e) {
     if ($('rules').open) return;
     if (e.target.tagName === 'BUTTON' && (e.key === 'Enter' || e.key === ' ')) return;
     var k = e.key.toLowerCase();
-    if (k === 'r' || k === ' ') { e.preventDefault(); rollAction(); }
+    if (k === ' ' || k === 'r' || k === 'enter') { e.preventDefault(); diceTap(); }
     else if (k === 'u' || k === 'backspace') { e.preventDefault(); undo(); }
-    else if (k === 'enter') { e.preventDefault(); done(); }
     else if (k === 'escape' && g.selected !== null) { g.selected = null; render(); }
   });
 
