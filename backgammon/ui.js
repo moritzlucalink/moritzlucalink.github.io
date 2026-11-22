@@ -142,7 +142,7 @@
     if (g.phase !== 'move') t = '';
     else if (isBot(g.state.turn)) t = prefix ? '' : g.played.length || legal().length ? 'The computer is moving.' : 'The computer can’t move.';
     else if (legal().length) t = 'Drag or tap a checker.';
-    else if (!g.played.length) t = 'No possible move. Tap the dice to pass.';
+    else if (!g.played.length) t = (mode === 'bot' ? 'You can’t' : NAMES[g.state.turn] + ' can’t') + ' move. Passing.';
     else if (remainingDice().some(function (d) { return !d.used; })) t = 'No further move possible. Tap the dice to hand over.';
     else t = 'Tap the dice to hand over.';
     g.msg = ((prefix ? prefix + ' ' : '') + t).trim();
@@ -181,6 +181,11 @@
     setHint(prefix);
     render();
     if (isBot(g.state.turn)) botMove();
+    else if (!legal().length) {
+      // Blocked: pass on our own after a moment (tapping the dice passes sooner).
+      var turn = g.turnStart;
+      later(function () { if (g.phase === 'move' && g.turnStart === turn) handOver(); }, 1800);
+    }
   }
 
   // The computer picks its whole move at once, then plays it one checker at a time so it can be followed.
