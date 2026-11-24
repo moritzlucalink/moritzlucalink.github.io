@@ -48,10 +48,16 @@
   var g, score = [0, 0], anim = null;
 
   // ---- mode: 'bot' (you play White against the computer) or 'pvp' (two players, one device) ----
-  var HUMAN = BG.WHITE, BOT_NAME = 'random';
-  var mode = null, bot = null, botTimer = null;
-  var lastMode = 'bot';
-  try { lastMode = window.localStorage.getItem('tavla-mode') || 'bot'; } catch (e) { /* storage unavailable */ }
+  // The human picks the opponent (LEVELS); HINT_BOT, always the strongest bot, suggests moves on request.
+  var HUMAN = BG.WHITE, HINT_BOT = 'pubeval';
+  var LEVELS = { easy: 'random', medium: 'heuristic', hard: 'pubeval' };
+  var mode = null, level = null, bot = null, helper = null, botTimer = null, pickStep = 'mode';
+  var lastMode = 'bot', lastLevel = 'medium';
+  try {
+    lastMode = window.localStorage.getItem('tavla-mode') || 'bot';
+    lastLevel = window.localStorage.getItem('tavla-level') || 'medium';
+    if (!LEVELS[lastLevel]) lastLevel = 'medium';
+  } catch (e) { /* storage unavailable */ }
 
   function isBot(p) { return mode === 'bot' && p !== HUMAN; }
   function botActive() { return !!g && isBot(g.state.turn) && (g.phase === 'roll' || g.phase === 'move'); }
@@ -59,26 +65,41 @@
   function startsMsg(p) { return mode === 'bot' ? (p === HUMAN ? 'You start.' : 'The computer starts.') : NAMES[p] + ' starts.'; }
   function later(fn, ms) { clearTimeout(botTimer); botTimer = setTimeout(fn, ms); }
 
-  function setMode(m) {
-    if (m !== mode) score = [0, 0];
+  // lvl: 'easy' | 'medium' | 'hard' (bot mode only). The session score restarts with a new opponent.
+  function setMode(m, lvl) {
+    lvl = m === 'bot' ? lvl : null;
+    if (m !== mode || lvl !== level) score = [0, 0];
     mode = m;
+    level = lvl;
     lastMode = m;
-    try { window.localStorage.setItem('tavla-mode', m); } catch (e) { /* ignore */ }
+    if (lvl) lastLevel = lvl;
+    try {
+      window.localStorage.setItem('tavla-mode', m);
+      if (lvl) window.localStorage.setItem('tavla-level', lvl);
+    } catch (e) { /* ignore */ }
     NAMES = m === 'bot' ? ['You', 'Computer'] : ['White', 'Black'];
-    bot = m === 'bot' ? window.BGBots.create(BOT_NAME, rng) : null;
+    bot = m === 'bot' ? window.BGBots.create(LEVELS[lvl], rng) : null;
+    helper = m === 'bot' ? window.BGBots.create(HINT_BOT, rng) : null;
     $('name0').textContent = NAMES[0];
     $('name1').textContent = NAMES[1];
-    $('subtitle').innerHTML = m === 'bot' ? 'backgammon &middot; against the computer' : 'backgammon &middot; two players, one table';
+    $('subtitle').innerHTML = m === 'bot' ? 'backgammon &middot; against the computer (' + lvl + ')' : 'backgammon &middot; two players, one table';
+  }
+
+  // The "New game" card has two steps: who's playing, then (against the computer) which opponent.
+  function showPickStep(step) {
+    pickStep = step;
+    renderPanel();
+    var b = $(step === 'mode' ? 'mode-' + lastMode : 'level-' + lastLevel);
+    if (b && b.focus) b.focus();
   }
 
   // Shows the board in its starting position with the "who's playing?" card on top.
   function chooseMode() {
     clearTimeout(botTimer);
-    g = { phase: 'setup', state: BG.initialState(), turnStart: null, dice: null, played: [], selected: null, opening: null, result: null, msg: '' };
+    g = { phase: 'setup', state: BG.initialState(), turnStart: null, dice: null, played: [], selected: null, opening: null, result: null, hint: null, msg: '' };
     anim = null;
     render();
-    var b = $('mode-' + lastMode);
-    if (b && b.focus) b.focus();
+    showPickStep('mode');
   }
 
   function newGame() {
@@ -92,6 +113,7 @@
       selected: null,
       opening: null,         // last opening roll {w, b}, shown after a tie
       result: null,
+      hint: null,            // suggested remaining moves while the help is shown
       msg: 'Tap the dice. The higher roll starts.'
     };
     anim = null;
@@ -148,6 +170,37 @@
     g.msg = ((prefix ? prefix + ' ' : '') + t).trim();
   }
 
+  // ---- help: the suggested move ----
+  // Point names from the human's view, in standard notation: "13/7*" (* = hit), "bar/22", "6/off".
+  function pointName(loc) { return loc === 'bar' || loc === 'off' ? loc : String(HUMAN === BG.WHITE ? loc + 1 : 24 - loc); }
+
+  // Joins moves of one checker that continue each other into one leg: 13/10 10/7 -> 13/7.
+  function hintLegs(state, moves) {
+    var legs = [], s = state, p = state.turn;
+    moves.forEach(function (m) {
+      var hit = typeof m.to === 'number' && s.points[m.to] === (p === BG.WHITE ? -1 : 1);
+      var before = s;
+      s = BG.applyMove(s, m);
+      var last = legs[legs.length - 1];
+      if (last && last.to === m.from && !last.hit) { last.to = m.to; last.hit = hit; last.after = s; }
+      else legs.push({ from: m.from, to: m.to, hit: hit, before: before, after: s });
+    });
+    return legs;
+  }
+
+  function toggleHint() {
+    if (!helper || !humanCanMove() || !legal().length) return;
+    if (g.hint) { g.hint = null; setHint(''); render(); return; }
+    var moves = helper.suggest(g.turnStart, g.dice, g.played);
+    if (!moves || !moves.length) return;
+    g.hint = moves;
+    g.msg = 'Suggested: ' + hintLegs(g.state, moves).map(function (l) {
+      return pointName(l.from) + '/' + pointName(l.to) + (l.hit ? '*' : '');
+    }).join(', ') + '.';
+    haptic(6);
+    render();
+  }
+
   function autoSelect() {
     var s = sources();
     g.selected = s.length === 1 ? s[0] : null;
@@ -176,6 +229,7 @@
     g.dice = dice;
     g.turnStart = g.state;
     g.played = [];
+    g.hint = null;
     anim = { dice: true };
     autoSelect();
     setHint(prefix);
@@ -203,6 +257,7 @@
     var p = g.state.turn, src = path[0].from;
     var from = origin || topPos(g.state, src, p);
     var hit = null;
+    g.hint = null;
     path.forEach(function (m) {
       if (typeof m.to === 'number' && g.state.points[m.to] === (p === BG.WHITE ? -1 : 1)) hit = locPos(m.to, 1 - p, 0, 1);
       g.played.push(m);
@@ -226,6 +281,7 @@
 
   function undo() {
     if (!humanCanMove() || !g.played.length) return;
+    g.hint = null;
     g.played.pop();
     var s = g.turnStart;
     g.played.forEach(function (m) { s = BG.applyMove(s, m); });
@@ -241,6 +297,7 @@
     g.dice = null;
     g.played = [];
     g.selected = null;
+    g.hint = null;
     if (isBot(g.state.turn)) {
       g.msg = 'The computer is rolling.';
       render();
@@ -298,6 +355,7 @@
     '<feComposite in2="SourceGraphic" operator="in"/></filter>',
     '<filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="3" stdDeviation="2.5" flood-color="#000" flood-opacity=".55"/></filter>',
     '<filter id="lift" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="10" stdDeviation="7" flood-color="#000" flood-opacity=".5"/></filter>',
+    '<marker id="hintHead" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="3.6" markerHeight="3.6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#f6d988"/></marker>',
     '<filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>',
     '</defs>'
   ].join('');
@@ -451,6 +509,21 @@
       var kk = mine ? cnt : 0;
       out += '<circle cx="' + pointX(t.to) + '" cy="' + checkerY(t.to, kk, mine ? cnt + 1 : 1) + '" r="' + (R - 2) + '" fill="#f6d988" fill-opacity=".25" stroke="#f6d988" stroke-width="2.5" stroke-dasharray="6 5"' + (t.path.length > 1 ? ' opacity=".6"' : '') + '/>';
     });
+
+    // help: arrows for the suggested move, bowed toward the middle of the board
+    if (human && g.hint) {
+      hintLegs(s, g.hint).forEach(function (leg) {
+        var a = topPos(leg.before, leg.from, s.turn);
+        var b = leg.to === 'off'
+          ? { x: (TRAY_L + TRAY_R) / 2, y: s.turn === BG.WHITE ? (MID + H - F) / 2 : (F + MID) / 2 }
+          : topPos(leg.after, leg.to, s.turn);
+        var mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        var cy = my + (MID - my) * 0.45;
+        out += '<circle class="hint-arrow" cx="' + a.x + '" cy="' + a.y + '" r="' + (R + 2) + '" fill="none" stroke="#f6d988" stroke-width="3" pointer-events="none"/>' +
+          '<path class="hint-arrow" d="M' + a.x + ' ' + a.y + ' Q' + mx + ' ' + cy + ' ' + b.x + ' ' + b.y + '" fill="none" stroke="#f6d988" stroke-width="5"' +
+          ' stroke-linecap="round" opacity=".92" marker-end="url(#hintHead)" filter="url(#shadow)" pointer-events="none"/>';
+      });
+    }
 
     // hit areas for points, bar and tray
     if (human) {
@@ -622,7 +695,14 @@
     });
     $('msg').textContent = g.msg;
     $('undo').disabled = !(humanCanMove() && g.played.length);
+    var hb = $('hint');
+    hb.hidden = mode !== 'bot' || g.phase === 'setup';
+    hb.disabled = !(helper && humanCanMove() && legal().length);
+    hb.classList.toggle('on', !!g.hint);
+    hb.setAttribute('aria-pressed', g.hint ? 'true' : 'false');
     $('modepick').hidden = g.phase !== 'setup';
+    $('pick-mode').hidden = pickStep !== 'mode';
+    $('pick-level').hidden = pickStep !== 'level';
 
     var ov = $('overlay');
     if (g.phase === 'over') {
@@ -684,10 +764,14 @@
   });
   $('overlay-new').addEventListener('click', newGame);
   $('overlay-mode').addEventListener('click', chooseMode);
-  ['bot', 'pvp'].forEach(function (m) {
-    $('mode-' + m).addEventListener('click', function () { setMode(m); newGame(); });
+  $('mode-bot').addEventListener('click', function () { showPickStep('level'); });
+  $('mode-pvp').addEventListener('click', function () { setMode('pvp'); newGame(); });
+  Object.keys(LEVELS).forEach(function (lvl) {
+    $('level-' + lvl).addEventListener('click', function () { setMode('bot', lvl); newGame(); });
   });
+  $('level-back').addEventListener('click', function () { showPickStep('mode'); });
   $('undo').addEventListener('click', undo);
+  $('hint').addEventListener('click', toggleHint);
   $('layout').addEventListener('click', cycleLayout);
   $('rules-btn').addEventListener('click', function () {
     var d = $('rules');
@@ -704,7 +788,10 @@
     var k = e.key.toLowerCase();
     if (k === ' ' || k === 'r' || k === 'enter') { e.preventDefault(); diceTap(); }
     else if (k === 'u' || k === 'backspace') { e.preventDefault(); undo(); }
+    else if (k === 'h') { e.preventDefault(); toggleHint(); }
     else if (k === 'escape' && g.selected !== null) { g.selected = null; render(); }
+    else if (k === 'escape' && g.hint) toggleHint();
+    else if (k === 'escape' && g.phase === 'setup' && pickStep === 'level') showPickStep('mode');
   });
 
   chooseMode();

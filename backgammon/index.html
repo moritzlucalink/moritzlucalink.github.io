@@ -68,6 +68,7 @@
       </div>
       <div id="modepick" class="overlay" hidden>
         <div class="overlay-card" role="dialog" aria-labelledby="mode-title">
+         <div id="pick-mode">
           <div id="mode-title" class="overlay-title">New game</div>
           <div class="overlay-sub">Who&rsquo;s playing?</div>
           <div class="choices">
@@ -93,6 +94,29 @@
               <span class="choice-sub">On this device</span>
             </button>
           </div>
+         </div>
+         <div id="pick-level" hidden>
+          <div class="overlay-title">Against the computer</div>
+          <div class="overlay-sub">Choose your opponent</div>
+          <div class="choices three">
+            <button id="level-easy" class="choice" type="button">
+              <svg viewBox="0 0 48 32" aria-hidden="true"><rect x="10" y="2" width="28" height="28" rx="6" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="24" cy="16" r="2.6" fill="currentColor"/></svg>
+              <span class="choice-title">Easy</span>
+              <span class="choice-sub">Moves at random</span>
+            </button>
+            <button id="level-medium" class="choice" type="button">
+              <svg viewBox="0 0 48 32" aria-hidden="true"><rect x="10" y="2" width="28" height="28" rx="6" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="10" r="2.6" fill="currentColor"/><circle cx="30" cy="22" r="2.6" fill="currentColor"/></svg>
+              <span class="choice-title">Medium</span>
+              <span class="choice-sub">Plays by rules</span>
+            </button>
+            <button id="level-hard" class="choice" type="button">
+              <svg viewBox="0 0 48 32" aria-hidden="true"><rect x="10" y="2" width="28" height="28" rx="6" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="10" r="2.6" fill="currentColor"/><circle cx="24" cy="16" r="2.6" fill="currentColor"/><circle cx="30" cy="22" r="2.6" fill="currentColor"/></svg>
+              <span class="choice-title">Hard</span>
+              <span class="choice-sub">Strongest bot</span>
+            </button>
+          </div>
+          <button id="level-back" class="link-btn" type="button">Back</button>
+         </div>
         </div>
       </div>
     </div>
@@ -105,9 +129,14 @@
         <span class="pscore" id="score0" title="Points this session"></span>
       </div>
 
-      <button id="undo" class="icon-btn undo" type="button" aria-label="Undo last move" title="Undo (U)">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
-      </button>
+      <div class="turn-tools">
+        <button id="undo" class="icon-btn undo" type="button" aria-label="Undo last move" title="Undo (U)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+        </button>
+        <button id="hint" class="icon-btn undo" type="button" aria-label="Suggest a move" title="Suggest a move (H)" aria-pressed="false" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2a6 6 0 0 0-3.5 10.9c.6.5 1 1.1 1 1.9v.4h5v-.4c0-.8.4-1.4 1-1.9A6 6 0 0 0 12 3.2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.8 19h4.4M10.6 21.4h2.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
 
       <div class="player right" id="card1">
         <span class="pscore" id="score1" title="Points this session"></span>
@@ -160,8 +189,9 @@
       <li><strong>Drag a checker</strong> to its new point, or tap it and then tap a highlighted point. If a checker has only one possible destination, a single tap moves it.</li>
       <li>Highlighted points include moves that use both dice with the same checker. To bear off, use the tray on the side.</li>
       <li>The arrow between the players undoes the last move, until you hand over.</li>
+      <li>Against the computer, the light bulb shows the move the computer would suggest. Tap it again to hide it.</li>
     </ul>
-    <p class="kbd-hint">Keyboard: <kbd>Space</kbd> roll or hand over, <kbd>U</kbd> undo, <kbd>Esc</kbd> deselect.</p>
+    <p class="kbd-hint">Keyboard: <kbd>Space</kbd> roll or hand over, <kbd>U</kbd> undo, <kbd>H</kbd> suggest a move, <kbd>Esc</kbd> deselect.</p>
     <p>The board-layout button switches between <em>Auto</em>, <em>Wide</em> and <em>Upright</em>. In Auto, the board turns upright on tall screens like phones.</p>
 
     <h3>Against the computer</h3>

@@ -134,6 +134,10 @@ h1 {
 .confirm-text { display: none; font-family: "Marcellus", serif; font-size: 14px; white-space: nowrap; }
 #newgame.armed { width: 132px; background: rgba(212, 169, 58, .18); border-color: var(--brass); }
 #newgame.armed .confirm-text { display: inline; }
+.icon-btn[hidden] { display: none; }
+#hint.on { background: rgba(212, 169, 58, .18); border-color: var(--brass); color: #f6d988; }
+.turn-tools { display: flex; gap: 8px; justify-content: center; }
+#board .hint-arrow { animation: fade .25s cubic-bezier(.2, .8, .2, 1); }
 
 /* ---------- board ---------- */
 main { max-width: 1200px; margin: 0 auto; padding: 0 var(--gutter); }
@@ -301,6 +305,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 var(--gutter); }
   transition: transform .15s var(--ease), border-color .2s, background .2s;
 }
 .choice svg { width: 54px; height: 36px; color: var(--brass-hi); margin-bottom: 6px; }
+.choices.three .choice { width: 150px; }
+#pick-level .link-btn { margin-top: 12px; }
 .choice:hover { border-color: var(--brass); background: rgba(212, 169, 58, 0.12); }
 .choice:active { transform: scale(.96); }
 .choice:focus-visible, .link-btn:focus-visible { outline: 2px solid var(--ivory); outline-offset: 3px; }
@@ -368,6 +374,8 @@ kbd {
   .overlay-sub { margin-bottom: 10px; }
   .choices { gap: 8px; }
   .choice { width: 136px; padding: 12px 8px 10px; }
+  .choices.three .choice { width: 104px; }
+  #pick-level .link-btn { margin-top: 8px; }
   .choice svg { width: 44px; height: 30px; margin-bottom: 2px; }
   .choice-title { font-size: 15px; }
   .choice-sub { font-size: 14px; }
@@ -397,14 +405,14 @@ kbd {
     width: min(calc(100vw - var(--side) - 2 * var(--gutter) - 12px), calc((100dvh - var(--chrome)) * var(--ar)));
   }
   .table-bar { width: var(--side); flex: none; margin: 0; grid-template-columns: 1fr; justify-items: stretch; }
-  .table-bar .undo { justify-self: center; }
+  .table-bar .turn-tools { justify-self: center; }
   .player.right { flex-direction: row-reverse; padding: 0 14px 0 8px; }
   .player.right .pstats { text-align: left; }
   .back-text { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pulse, .steam, #board .die.ghost, #board .badge-pop, .overlay, .overlay-card, .rules[open] { animation: none; }
+  .pulse, .steam, #board .die.ghost, #board .hint-arrow, #board .badge-pop, .overlay, .overlay-card, .rules[open] { animation: none; }
   .pulse { opacity: 0.55; }
   .steam { opacity: 0.4; }
 }
